@@ -20,28 +20,50 @@ The sales person will use the OptiMeet Mobile App to navigate to the client's lo
 
 This module facilitates the generation of a TSP graph using real-world data from OpenStreetMap for any location worldwide:
 
-1. **Data Collection**:
-   - Collects road network data from OpenStreetMap (OSM) format
-   - Supports any location worldwide using either:
-     - Place names (e.g., "Paris, France", "New York, USA")
-     - Custom bounding box coordinates
-   - Caches data locally for improved performance
+1. **Data Collection and Network Generation**:
+   - Collects road network data from OpenStreetMap (OSM) format via OSMnx
+   - Supports any location worldwide using Bounding box coordinates
+   - Generates a NetworkX MultiDiGraph optimized for path finding
+   - Handles non-planar elements like bridges, tunnels, and interchanges
+   - Ensures strong connectivity by retaining largest connected component
 
-2. **Data Processing**:
-   - Converts the OSM data into a graph format where intersections are nodes and roads are edges
-   - Handles different road types and their characteristics
-   - Calculates realistic travel times based on road types and speed limits
+2. **Data Processing and Graph Enhancement**:
+   - Converts OSM data into a graph where:
+     - Nodes represent intersections with properties:
+       - Unique OSM identifier
+       - UTM projected coordinates (x, y)
+       - Geographic coordinates (latitude, longitude)
+     - Edges represent roads with properties:
+       - Physical distance in meters
+       - Travel time in seconds
+       - Speed limits and road type
+       - Directional flow (one-way/bidirectional)
+   - Supports topology simplification for complex intersections
+   - Projects coordinates to UTM for accurate distance calculations
+   - Validates network connectivity and handles edge cases
 
-3. **Shortest Path Calculation**:
-   - Utilizes the A* algorithm to calculate the shortest path between each pair of nodes
-   - Takes into account actual road networks and travel times
+3. **Shortest Path Calculation using A* Algorithm**:
+   - Implements A* path finding with components:
+     - Heuristic function h(n) for distance estimation
+     - Cost function g(n) for actual travel costs
+     - Evaluation function f(n) = g(n) + h(n)
+   - Takes into account:
+     - Real road networks and travel times
+     - Road type characteristics and speed limits
+     - One-way streets and turn restrictions
    - Supports both time-based and distance-based optimization
+   - Provides efficient path finding between any two points
 
-4. **Visualization**:
+4. **Visualization and Analysis Tools**:
    - Interactive web-based visualization of road networks
    - Color-coded road types (highways, major roads, minor roads)
-   - Optional display of intersections and points of interest
+   - Optional display of:
+     - Intersections and nodes
+     - Points of interest
+     - Path geometry and turn-by-turn directions
    - Support for viewing the optimized route
+   - Distance measurements and area overview
+   - Interactive controls for exploration
 
 ### 2. Benchmarking TSP Algorithms
 
@@ -108,24 +130,3 @@ The final product is a Python module that optimizes meeting schedules globally b
 - Updated optimized route with turn-by-turn directions
 - Estimated travel times between locations
 - Interactive visualization of the route and schedule
-
-## Usage Example
-
-```python
-from tsp.graph.osm_loader import OSMDataLoader
-
-# Create TSP instance for any location
-loader = OSMDataLoader("Tokyo, Japan")
-graph = loader.load_network()
-
-# Add points of interest
-points = [
-    (35.6762, 139.6503),  # Shinjuku
-    (35.6586, 139.7454),  # Tokyo Tower
-    # ... more points
-]
-
-# Generate and visualize the route
-instance = loader.create_tsp_instance(points)
-loader.visualize_network(graph)
-```
