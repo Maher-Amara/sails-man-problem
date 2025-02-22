@@ -26,44 +26,57 @@ This module facilitates the generation of a TSP graph using real-world data from
    - Generates a NetworkX MultiDiGraph optimized for path finding
    - Handles non-planar elements like bridges, tunnels, and interchanges
    - Ensures strong connectivity by retaining largest connected component
+   - Supports topology simplification for complex intersections
+   - Automatic error handling and retries for data retrieval
 
 2. **Data Processing and Graph Enhancement**:
-   - Converts OSM data into a graph where:
-     - Nodes represent intersections with properties:
+   - Converts OSM data into a graph structure where:
+     - Nodes (intersections) contain:
        - Unique OSM identifier
        - UTM projected coordinates (x, y)
        - Geographic coordinates (latitude, longitude)
-     - Edges represent roads with properties:
+       - Intersection type indicators
+     - Edges (roads) contain:
        - Physical distance in meters
        - Travel time in seconds
        - Speed limits and road type
        - Directional flow (one-way/bidirectional)
-   - Supports topology simplification for complex intersections
+       - Road geometry information
    - Projects coordinates to UTM for accurate distance calculations
    - Validates network connectivity and handles edge cases
+   - Processes edge speeds and travel times automatically
+   - Supports smart caching with configurable timeout
 
-3. **Shortest Path Calculation using A* Algorithm**:
-   - Implements A* path finding with components:
-     - Heuristic function h(n) for distance estimation
-     - Cost function g(n) for actual travel costs
+3. **A* Path Finding Implementation**:
+   - Implements A* algorithm with components:
+     - Heuristic function h(n): Estimates remaining distance to goal
+     - Cost function g(n): Tracks actual travel costs
      - Evaluation function f(n) = g(n) + h(n)
-   - Takes into account:
+   - Optimizes for:
+     - Geographic distance calculations
      - Real road networks and travel times
-     - Road type characteristics and speed limits
+     - Road type characteristics
      - One-way streets and turn restrictions
-   - Supports both time-based and distance-based optimization
    - Provides efficient path finding between any two points
+   - Handles both time-based and distance-based optimization
+   - Includes robust error handling and validation
 
 4. **Visualization and Analysis Tools**:
-   - Interactive web-based visualization of road networks
-   - Color-coded road types (highways, major roads, minor roads)
-   - Optional display of:
-     - Intersections and nodes
-     - Points of interest
-     - Path geometry and turn-by-turn directions
-   - Support for viewing the optimized route
-   - Distance measurements and area overview
-   - Interactive controls for exploration
+   - Interactive web-based visualization features:
+     - Color-coded road classifications
+     - Node representation of intersections
+     - Edge representation of street segments
+     - Multiple zoom levels and layer management
+   - Support for:
+     - Points of interest marking
+     - Distance measurements
+     - Area overview
+     - Interactive navigation controls
+   - Route visualization capabilities:
+     - Path geometry display
+     - Turn-by-turn directions
+     - Travel time estimates
+     - Distance calculations
 
 ### 2. Benchmarking TSP Algorithms
 
