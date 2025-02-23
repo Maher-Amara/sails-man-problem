@@ -1,10 +1,9 @@
 from .osm_loader import OSMDataLoader
 from .astar import Astar
-from .utils import calculate_bounding_box, visualize_network_with_points, visualize_node_mapping, visualize_path
+from .utils import calculate_bounding_box, visualize_network_with_points, visualize_node_mapping, visualize_path, save_tsp_file
 from typing import List, Tuple, Optional
 import networkx as nx
-import numpy as np
-import osmnx as ox
+import os
 
 class TSPGraphGenerator:
     """
@@ -145,3 +144,24 @@ class TSPGraphGenerator:
                           path=path,          # Store path nodes
                           length=distance)    # Store length for compatibility
         return G
+    
+    def save_distance_matrix(self, graph: nx.DiGraph, location: str = 'be', save_path: str = 'assets/') -> None:
+        """
+        Save the distance matrix to a TSP file in TSPLIB format.
+        
+        Args:
+            graph: NetworkX directed graph with distances between points
+            save_path: Path where to save the TSP file
+        """
+        # Ensure the graph has all required attributes
+        for i in range(len(self.locations)):
+            if 'pos' not in graph.nodes[i]:
+                raise ValueError(f"Node {i} missing 'pos' attribute")
+            if 'label' not in graph.nodes[i]:
+                raise ValueError(f"Node {i} missing 'label' attribute")
+        
+        # Create directory if it doesn't exist
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        
+        # Save the graph in TSPLIB format
+        save_tsp_file(graph, str(os.path.join(save_path, f"{location}{len(self.locations)}.tsp")))

@@ -9,7 +9,7 @@ from shapely.geometry import Point
 import numpy as np
 import random
 
-def calculate_bounding_box(points: List[Tuple[float, float]], margin: float = 0.01) -> Tuple[float, float, float, float]:
+def calculate_bounding_box(points: List[Tuple[float, float]], margin: float = 0.1) -> Tuple[float, float, float, float]:
     """
     Calculate a bounding box that contains all points with a margin
     
@@ -160,15 +160,56 @@ def visualize_network_with_points(
     )
     plt.close()
 
-def save_tsp_file(graph, filename: str) -> None:
+def save_tsp_file(graph: nx.DiGraph, filename: str = 'assets/graph.tsp') -> None:
     """
-    save a TSP file (traveling salesman problem) from the given tsp graph.
+    Save a TSP file (traveling salesman problem) in TSPLIB format.
     
     Args:
-        graph:
+        graph: NetworkX directed graph with nodes containing 'pos' and 'label' attributes
         filename: Name of the output file
     """
-    pass
+    try:
+        with open(filename, 'w') as f:
+            # Write header
+            name = filename.split('/')[-1].split('.')[0]
+            f.write(f"NAME : {name}\n")
+            f.write(f"COMMENT : Generated from OpenStreetMap data\n")
+            f.write("TYPE : TSP\n")
+            f.write(f"DIMENSION : {len(graph.nodes)}\n")
+            f.write("EDGE_WEIGHT_TYPE : EXPLICIT\n")
+            f.write("EDGE_WEIGHT_FORMAT : FULL_MATRIX\n")
+            
+            # Write node coordinates section
+            f.write("NODE_COORD_SECTION\n")
+            for i in range(len(graph.nodes)):
+                pos = graph.nodes[i]['pos']  # (lon, lat) format
+                # Convert to the format: node_id x y
+                f.write(f"{i+1} {pos[0]:.6f} {pos[1]:.6f}\n")
+            
+            # Write edge weights section
+            f.write("EDGE_WEIGHT_SECTION\n")
+            n = len(graph.nodes)
+            for i in range(n):
+                weights = []
+                for j in range(n):
+                    if i == j:
+                        weights.append('0')
+                    else:
+                        # Get weight if edge exists, otherwise infinity
+                        weight = graph.get_edge_data(i, j)
+                        if weight is not None:
+                            weights.append(f"{int(weight['weight'])}")
+                        else:
+                            weights.append('9999999')  # Standard large value for no path
+                f.write(' '.join(weights) + '\n')
+            
+            f.write("EOF\n")
+            
+        print(f"Saved TSP file to {filename}")
+        
+    except Exception as e:
+        print(f"Error saving TSP file: {e}")
+        raise
 
 def load_tsp_file(filename):
     """

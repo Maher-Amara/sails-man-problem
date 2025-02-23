@@ -54,7 +54,7 @@ def som(problem, iterations, learning_rate=0.8):
 
         # Check for plotting interval
         if not i % 1000:
-            plot_network(cities, network, name='diagrams/{:05d}.png'.format(i))
+            plot_network(cities, network, name='diagrams/tsp_solution/{:05d}.png'.format(i))
 
         # Check if any parameter has completely decayed.
         if n < 1:
@@ -68,10 +68,10 @@ def som(problem, iterations, learning_rate=0.8):
     else:
         print('Completed {} iterations.'.format(iterations))
 
-    plot_network(cities, network, name='diagrams/final.png')
+    plot_network(cities, network, name='diagrams/tsp_solution/final.png')
 
     route = get_route(cities, network)
-    plot_route(cities, route, 'diagrams/route.png')
+    plot_route(cities, route, 'diagrams/tsp_solution/route.png')
     return route
 
 if __name__ == '__main__':

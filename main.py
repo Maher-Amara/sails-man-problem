@@ -23,10 +23,7 @@ def main():
     # calculate bounding box
     bbox = calculate_bounding_box([p[0] for p in points_with_labels], 0)
     # get points of interest
-    points_with_labels.extend(random_places_geo(bbox, 3))
-
-    # teke just the firs three points
-    # points_with_labels = points_with_labels[:5]
+    points_with_labels.extend(random_places_geo(bbox, 100))
 
     # Separate points and labels
     points = [p[0] for p in points_with_labels]
@@ -42,6 +39,9 @@ def main():
 
     # Create the complete bidirectional graph with real street distances
     G = generator.create_distance_matrix()
+
+    # Save the distance matrix
+    generator.save_distance_matrix(G, location='be', save_path='assets/')
     
     # Save the graph visualization
     visualize_tsp_graph(G, labels, save_path='diagrams/tsp_graph.png')
