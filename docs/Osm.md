@@ -126,7 +126,7 @@ The loader includes comprehensive visualization features:
    - Multiple zoom levels
    - Layer management
 
-   ![Street Network Example](../out/street_network.png)
+   ![Street Network Example](../diagrams/street_network.png)
    *Example: Street network visualization of Brussels showing major landmarks*
 
    The visualization above demonstrates:

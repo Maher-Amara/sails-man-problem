@@ -5,7 +5,7 @@ Handles loading and processing of OpenStreetMap data using OSMnx
 
 import osmnx as ox
 import networkx as nx
-from typing import Dict, Union, Tuple
+from typing import Tuple
 import logging
 
 class OSMDataLoader:
@@ -16,7 +16,9 @@ class OSMDataLoader:
     
     def __init__(self, bbox: Tuple[float, float, float, float],
                  network_type: str = 'drive',
-                 simplify: bool = True):
+                 simplify: bool = False,
+                 truncate_by_edge: bool = False,
+                 retain_all: bool = True):
         """
         Initialize the OSM data loader
         
@@ -34,6 +36,8 @@ class OSMDataLoader:
             raise ValueError("Only 'drive' network type is supported")
         self.network_type = network_type
         self.simplify = simplify
+        self.truncate_by_edge = truncate_by_edge
+        self.retain_all = retain_all
         
         # Validate and store bbox
         self._validate_bbox(bbox)
@@ -43,6 +47,7 @@ class OSMDataLoader:
         ox.settings.use_cache = True
         ox.settings.log_console = True
         ox.settings.timeout = 180  # Increase timeout for larger areas
+        ox.settings.cache_folder = '.cache'
         ox.settings.useful_tags_way = ['bridge', 'tunnel', 'oneway', 'lanes', 'ref', 'name',
                                      'highway', 'maxspeed', 'service', 'access', 'area',
                                      'landuse', 'width', 'est_width', 'junction']
@@ -80,10 +85,7 @@ class OSMDataLoader:
             graph = ox.routing.add_edge_speeds(graph)
             graph = ox.routing.add_edge_travel_times(graph)
             
-            # Get largest strongly connected component
-            largest_cc = max(nx.strongly_connected_components(graph), key=len)
-            graph = graph.subgraph(largest_cc).copy()
-            
+            self.logger.info(f"Processed graph with {len(graph.nodes)} nodes and {len(graph.edges)} edges")
             return graph
             
         except Exception as e:
@@ -103,9 +105,10 @@ class OSMDataLoader:
             # Download graph using bbox
             graph = ox.graph_from_bbox(
                 bbox=self.bbox,
-                network_type=self.network_type,
+                network_type= self.network_type,
                 simplify=self.simplify,
-                truncate_by_edge=True
+                truncate_by_edge=self.truncate_by_edge,
+                retain_all=self.retain_all,
             )
             
             # Process and optimize the graph
