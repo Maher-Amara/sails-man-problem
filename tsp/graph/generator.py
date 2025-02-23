@@ -1,7 +1,10 @@
 from .osm_loader import OSMDataLoader
 from .astar import Astar
-from .utils import calculate_bounding_box, visualize_network_with_points, visualize_node_mapping
+from .utils import calculate_bounding_box, visualize_network_with_points, visualize_node_mapping, visualize_path
 from typing import List, Tuple, Optional
+import networkx as nx
+import numpy as np
+import osmnx as ox
 
 class TSPGraphGenerator:
     """
@@ -38,34 +41,16 @@ class TSPGraphGenerator:
         self.locations = points
         self.labels = labels if labels else [f"Point {i+1}" for i in range(len(points))]
         
-        # Load the street network
-        loader = OSMDataLoader(self.bbox, network_type='drive', simplify=False)
+        # Initialize OSM loader with optimized settings
+        loader = OSMDataLoader(
+            bbox=self.bbox,
+            network_type='drive',
+            simplify=True,  # Simplify the graph topology
+            truncate_by_edge=True,  # Include edges that cross the bounding box
+            retain_all=False,  # Remove disconnected components
+        )
         self.graph = loader.load_network()
-        self.astar = Astar()
-
-    def find_optimal_path(self,
-                         start: Tuple[float, float],
-                         end: Tuple[float, float]) -> Tuple[List[int], float]:
-        """
-        Find the optimal path between two points using A* algorithm.
-        
-        Args:
-            start: Starting point as (latitude, longitude)
-            end: Destination point as (latitude, longitude)
-            
-        Returns:
-            Tuple containing:
-                - List of node IDs representing the optimal path
-                - Total path distance in meters
-                
-        Raises:
-            ValueError: If no path can be found between the points
-        """
-        try:
-            path, distance = self.astar.find_path(self.graph, start, end)
-            return path, distance
-        except Exception as e:
-            raise ValueError(f"Could not find path between points: {str(e)}")
+        self.astar = Astar(caching=True)
 
     def visualize(self, save_path: str = 'diagrams/street_network.png') -> None:
         """
@@ -76,29 +61,27 @@ class TSPGraphGenerator:
         """
         visualize_network_with_points(self.graph, self.locations, self.labels, save_path)
         
-    def visualize_node_mapping(self, 
-                             point: Tuple[float, float],
-                             label: str,
-                             save_path: str) -> None:
+    def visualize_node_mapping(self, save_path: str = 'diagrams/node_mapping') -> None:
         """
-        Create a debug visualization showing how a point is mapped to a network node.
+        Create a debug visualization showing how all points are mapped to their nearest network nodes.
         
         Args:
-            point: Point coordinates as (latitude, longitude)
-            label: Label for the point (e.g., "Grand Place")
             save_path: Path where to save the visualization
         """
-        # Find the mapped edge and projected point using the same logic as in A*
-        start_node, end_node, proj_point = self.astar.find_nearest_node(self.graph, point)
-        visualize_node_mapping(self.graph, point, (start_node, end_node), proj_point, label, save_path)
+        # Get nearest nodes for all points in batch
+        nearest_nodes = self.astar.batch_find_nearest_node(self.graph, self.locations)
         
+        # Create visualizations for each point
+        for (point, label, (_, proj_point)) in zip(self.locations, self.labels, nearest_nodes):
+            visualize_node_mapping(self.graph, point, proj_point, label, save_path=f"{save_path}/{label}_mapping.png")
+    
     def visualize_path(self,
                       path: List[int],
                       start: Tuple[float, float],
                       end: Tuple[float, float],
                       start_label: str,
                       end_label: str,
-                      save_path: str = 'diagrams/path.png') -> None:
+                      save_path: str = 'diagrams/paths') -> None:
         """
         Create a visualization showing the path between two points.
         
@@ -110,5 +93,55 @@ class TSPGraphGenerator:
             end_label: Label for the end point
             save_path: Path where to save the visualization
         """
-        from .utils import visualize_path
         visualize_path(self.graph, path, start, end, start_label, end_label, save_path)
+
+    def create_distance_matrix(self) -> nx.DiGraph:
+        """
+        Create a directed graph with A* distances between all points.
+        
+        Returns:
+            NetworkX directed graph with distances between all points
+        """
+        # Create a directed graph
+        G = nx.DiGraph()
+        n = len(self.locations)
+        
+        # Get the largest strongly connected component first
+        components = list(nx.strongly_connected_components(self.graph))
+        if not components:
+            raise ValueError("No strongly connected components found in graph")
+            
+        largest_cc = max(components, key=len)
+        graph_scc = self.graph.subgraph(largest_cc).copy()
+        
+        print(f"\nUsing largest connected component with {len(graph_scc.nodes)} nodes")
+        
+        # Add nodes with labels and positions
+        for i, (point, label) in enumerate(zip(self.locations, self.labels)):
+            lat, lon = point
+            G.add_node(i, 
+                      pos=(lon, lat),  # Store lon/lat for visualization
+                      coords=point,    # Store original coordinates
+                      label=label)     # Store label
+        
+        # Find nearest nodes for all points
+        print("\nFinding nearest nodes...")
+        nearest_nodes = self.astar.batch_find_nearest_node(graph_scc, self.locations)
+        
+        # Create all pairs of indices, excluding self-loops
+        pairs = [(i, j) for i in range(n) for j in range(n) if i != j]
+        start_nodes = [nearest_nodes[i] for i, _ in pairs]
+        end_nodes = [nearest_nodes[j] for _, j in pairs]
+        
+        # Find all paths in batch
+        print(f"\nCalculating paths between {n} points ({len(pairs)} paths)...")
+        path_results = self.astar.batch_find_path(graph_scc, start_nodes, end_nodes)
+        
+        # Add edges to graph and fill distance matrix
+        for (path, distance), (i, j) in zip(path_results, pairs):
+            if path:  # Only add edge if path exists
+                G.add_edge(i, j, 
+                          weight=distance,    # Store distance as weight
+                          path=path,          # Store path nodes
+                          length=distance)    # Store length for compatibility
+        return G

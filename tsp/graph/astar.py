@@ -1,286 +1,228 @@
 import numpy as np
-from tsp.c_extension import astar
 import networkx as nx
-from typing import List, Tuple
-import numpy.typing as npt
-import logging
+from typing import List, Tuple, Dict, Optional
 import pyproj
 from math import sqrt
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+import time
 
 class Astar:
     """A* algorithm implementation for solving Traveling Salesman Problem."""
     
-    def __init__(self):
+    def __init__(self, caching: bool = False):
         """Initialize the A* solver."""
         self._distance_matrix = None
         # Initialize coordinate transformers
         self.wgs84_to_utm = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:32631", always_xy=True)
+        # Cache for coordinate transformations
+        self._coord_cache: Dict[Tuple[float, float], Tuple[float, float]] = {}
+        # Cache for nearest nodes
+        self._nearest_node_cache: Dict[Tuple[float, float], Tuple[int, Tuple[float, float]]] = {}
+        # Cache for paths - now using nested dict for O(1) lookup
+        self._path_cache: Dict[int, Dict[int, Tuple[List[int], float]]] = {}
+        self.caching = caching
         
     def _convert_to_utm(self, lat: float, lon: float) -> Tuple[float, float]:
         """Convert WGS84 coordinates (lat, lon) to UTM coordinates (x, y)."""
+        coord_key = (lat, lon)
+        if coord_key in self._coord_cache:
+            return self._coord_cache[coord_key]
+            
         x, y = self.wgs84_to_utm.transform(lon, lat)
+        self._coord_cache[coord_key] = (x, y)
         return x, y
         
     def _euclidean_distance(self, x1: float, y1: float, x2: float, y2: float) -> float:
         """Calculate Euclidean distance between two points."""
         return sqrt((x2 - x1)**2 + (y2 - y1)**2)
         
-    def _project_point_to_line(self, point: Tuple[float, float], 
-                               line_start: Tuple[float, float], 
-                               line_end: Tuple[float, float]) -> Tuple[float, float, float]:
+    def _find_nearest_node(self, point: Tuple[float, float], coords_array: np.ndarray, node_ids: List) -> Tuple[int, Tuple[float, float]]:
         """
-        Project a point onto a line segment and return the projected point and distance.
-        
+        Find the nearest node in the coords_array to the given point.
+
         Args:
-            point: Point to project (x, y)
-            line_start: Start point of line segment (x, y)
-            line_end: End point of line segment (x, y)
-            
-        Returns:
-            Tuple containing:
-                - x coordinate of projected point
-                - y coordinate of projected point
-                - distance from original point to projected point
-        """
-        try:
-            # Convert to numpy arrays for easier vector operations
-            p = np.array(point)
-            a = np.array(line_start)
-            b = np.array(line_end)
-            
-            # Vector from a to b
-            ab = b - a
-            # Vector from a to p
-            ap = p - a
-            
-            # Calculate the projection
-            ab_length_squared = np.dot(ab, ab)
-            
-            if ab_length_squared == 0:
-                # If the line segment is actually a point
-                return a[0], a[1], np.linalg.norm(ap)
-                
-            # Calculate the position of the projection along the line segment
-            t = np.dot(ap, ab) / ab_length_squared
-            
-            if t < 0:
-                # Point projects before start of line segment
-                proj = a
-            elif t > 1:
-                # Point projects after end of line segment
-                proj = b
-            else:
-                # Point projects onto line segment
-                proj = a + t * ab
-                
-            # Calculate distance from point to projection
-            distance = np.linalg.norm(p - proj)
-            
-            return float(proj[0]), float(proj[1]), float(distance)
-            
-        except Exception as e:
-            logger.warning(f"Error in point projection: {str(e)}")
-            # Return the closest endpoint as a fallback
-            dist_to_start = np.linalg.norm(p - a)
-            dist_to_end = np.linalg.norm(p - b)
-            if dist_to_start < dist_to_end:
-                return float(a[0]), float(a[1]), float(dist_to_start)
-            else:
-                return float(b[0]), float(b[1]), float(dist_to_end)
-        
-    def _project_point_to_linestring(self, point: Tuple[float, float], 
-                                    linestring: List[Tuple[float, float]]) -> Tuple[float, float, float]:
-        """
-        Project a point onto a linestring (multi-segment line) and return the projected point and distance.
-        
-        Args:
-            point: Point to project (x, y)
-            linestring: List of (x, y) coordinates representing the street geometry
-            
-        Returns:
-            Tuple containing:
-                - x coordinate of projected point
-                - y coordinate of projected point
-                - distance from original point to projected point
-        """
-        if not linestring:
-            raise ValueError("Empty linestring provided")
-            
-        if len(linestring) < 2:
-            return linestring[0][0], linestring[0][1], self._euclidean_distance(
-                point[0], point[1], linestring[0][0], linestring[0][1]
-            )
-            
-        # Find the closest segment in the linestring
-        min_distance = float('inf')
-        nearest_proj = None
-        
-        # Check each segment in the linestring
-        for i in range(len(linestring) - 1):
-            try:
-                proj_x, proj_y, dist = self._project_point_to_line(
-                    point,
-                    linestring[i],
-                    linestring[i + 1]
-                )
-                
-                if dist < min_distance:
-                    min_distance = dist
-                    nearest_proj = (proj_x, proj_y)
-            except Exception as e:
-                logger.warning(f"Failed to project point onto segment {i}: {str(e)}")
-                continue
-        
-        # If no valid projection found, use the closest endpoint
-        if nearest_proj is None:
-            distances = [
-                (self._euclidean_distance(point[0], point[1], x, y), (x, y))
-                for x, y in linestring
-            ]
-            min_distance, nearest_proj = min(distances, key=lambda x: x[0])
-            logger.info(f"No valid projection found, using closest endpoint at distance {min_distance:.2f}m")
-        
-        return nearest_proj[0], nearest_proj[1], min_distance
-        
-    def find_nearest_node(self, graph: nx.MultiDiGraph, point: Tuple[float, float]) -> Tuple[int, int, Tuple[float, float]]:
-        """
-        Find the nearest node in the graph to the given point.
-        
-        Args:
-            graph: NetworkX graph of the street network
             point: Point coordinates as (latitude, longitude)
+            coords_array: Array of coordinates
+            node_ids: List of node ids
             
         Returns:
             Tuple containing:
-                - ID of the nearest node
-                - Same ID (for compatibility)
-                - Coordinates of the nearest node (x, y)
+            - Nearest node ID
+            - Nearest node coordinates (x, y)
         """
         # Convert input point to UTM
         point_x, point_y = self._convert_to_utm(point[0], point[1])
         
-        # Find the nearest node by Euclidean distance
-        nearest_node = None
-        min_distance = float('inf')
-        nearest_coords = None
-        
-        for node_id, data in graph.nodes(data=True):
-            try:
-                node_x = float(data['x'])
-                node_y = float(data['y'])
-                
-                # Skip nodes with invalid coordinates
-                if np.isnan(node_x) or np.isnan(node_y):
-                    continue
-                    
-                distance = self._euclidean_distance(point_x, point_y, node_x, node_y)
-                
-                if distance < min_distance:
-                    min_distance = distance
-                    nearest_node = node_id
-                    nearest_coords = (node_x, node_y)
-                    
-            except Exception as e:
-                logger.warning(f"Failed to process node {node_id}: {str(e)}")
-                continue
+        # Calculate distances using vectorized operations
+        distances = np.sqrt(np.sum((coords_array - np.array([point_x, point_y])) ** 2, axis=1))
+        min_idx = np.argmin(distances)
+        nearest_node = node_ids[min_idx]
+        nearest_coords = tuple(coords_array[min_idx])
         
         if nearest_node is None:
             raise ValueError("Could not find nearest node in graph")
             
-        logger.info(f"Found nearest node {nearest_node} at distance {min_distance:.2f}m")
-        
-        # Return the same node ID twice for compatibility with existing code
-        return nearest_node, nearest_node, nearest_coords
-        
-    def find_path(self, graph: nx.MultiDiGraph,
-                  start: tuple[float, float],
-                  end: tuple[float, float]) -> tuple[List[int], float]:
+        return (nearest_node, nearest_coords)
+
+    def batch_find_nearest_node(self, graph: nx.MultiDiGraph, points: List[Tuple[float, float]]) -> List[Tuple[int, Tuple[float, float]]]:
         """
-        Find the shortest path between two coordinates using A* algorithm.
+        Find the nearest node for a batch of points efficiently.
         
         Args:
-            graph: NetworkX graph representing the road network
-            start: Starting coordinates (latitude, longitude)
-            end: Destination coordinates (latitude, longitude)
+            graph: NetworkX graph
+            points: List of (latitude, longitude) coordinates
             
         Returns:
-            Tuple containing the path (list of node indices) and total cost
+            List of tuples containing:
+            - Nearest node ID
+            - Nearest node coordinates (x, y)
         """
-        # Convert input coordinates from WGS84 to UTM
-        start_x, start_y = self._convert_to_utm(start[0], start[1])
-        end_x, end_y = self._convert_to_utm(end[0], end[1])
+        start_time = time.time()
         
-        logger.info(f"Start UTM coordinates: ({start_x:.2f}, {start_y:.2f})")
-        logger.info(f"End UTM coordinates: ({end_x:.2f}, {end_y:.2f})")
+        # First check cache for all points
+        if self.caching:
+            cached_results = [self._nearest_node_cache.get(point) for point in points]
+            if all(result is not None for result in cached_results):
+                print("Using cached nearest nodes")
+                return cached_results
         
-        # Convert graph to distance matrix
-        nodes = list(graph.nodes(data=True))
-        n = len(nodes)
-        node_to_idx = {node_id: i for i, (node_id, _) in enumerate(nodes)}
+        # Pre-calculate UTM coordinates for all nodes once
+        node_coords = []
+        node_ids = []
+        for node_id, data in graph.nodes(data=True):
+            try:
+                node_x = float(data['x'])
+                node_y = float(data['y'])
+                if not (np.isnan(node_x) or np.isnan(node_y)):
+                    node_coords.append((node_x, node_y))
+                    node_ids.append(node_id)
+            except Exception as e:
+                print(f"Failed to process node {node_id}: {str(e)}")
+                continue
         
-        # Find nearest edges and projection points
-        start_u, start_v, start_proj = self.find_nearest_node(graph, start)
-        end_u, end_v, end_proj = self.find_nearest_node(graph, end)
+        coords_array = np.array(node_coords)
         
-        # Create distance matrix
-        dist_matrix = np.full((n + 2, n + 2), np.inf)  # Add 2 nodes for projected points
+        # Process points that weren't in cache
+        results = []
+        for i, point in enumerate(points):
+            if self.caching and cached_results[i] is not None:
+                results.append(cached_results[i])
+            else:
+                result = self._find_nearest_node(point, coords_array, node_ids)
+                if self.caching:
+                    self._nearest_node_cache[point] = result
+                results.append(result)
         
-        # Fill the main part of the matrix
-        for u, v, data in graph.edges(data=True):
-            i, j = node_to_idx[u], node_to_idx[v]
-            dist_matrix[i, j] = data.get('length', np.inf)
-            if not data.get('oneway', False):
-                dist_matrix[j, i] = data.get('length', np.inf)
+        execution_time = time.time() - start_time
+        print(f"Found nearest nodes in {execution_time:.4f} seconds for {len(points)} points")
         
-        # Add connections for projected points
-        start_idx = n  # Index for projected start point
-        end_idx = n + 1  # Index for projected end point
+        return results
+
+    def _get_cached_path(self, start_id: int, end_id: int) -> Optional[Tuple[List[int], float]]:
+        """Get a path from cache if it exists."""
+        if not self.caching:
+            return None
+        return self._path_cache.get(start_id, {}).get(end_id)
+
+    def _cache_path(self, start_id: int, end_id: int, path_data: Tuple[List[int], float]) -> None:
+        """Cache a path and its cost."""
+        if not self.caching:
+            return
+        if start_id not in self._path_cache:
+            self._path_cache[start_id] = {}
+        self._path_cache[start_id][end_id] = path_data
+
+    def _find_single_path(self, graph: nx.MultiDiGraph, start_id: int, end_id: int) -> Tuple[List[int], float]:
+        """Find a single path between two nodes."""
+        try:
+            path = nx.astar_path(graph, start_id, end_id, weight='length')
+            cost = sum(graph[path[k]][path[k+1]][0]['length'] for k in range(len(path)-1))
+            return path, cost
+        except nx.NetworkXNoPath:
+            return [], float('inf')
         
-        # Connect start projection to its edge endpoints
-        start_u_idx = node_to_idx[start_u]
-        start_v_idx = node_to_idx[start_v]
-        start_u_dist = self._euclidean_distance(
-            start_proj[0], start_proj[1],
-            float(graph.nodes[start_u]['x']), float(graph.nodes[start_u]['y'])
-        )
-        start_v_dist = self._euclidean_distance(
-            start_proj[0], start_proj[1],
-            float(graph.nodes[start_v]['x']), float(graph.nodes[start_v]['y'])
-        )
-        dist_matrix[start_idx, start_u_idx] = start_u_dist
-        dist_matrix[start_idx, start_v_idx] = start_v_dist
-        dist_matrix[start_u_idx, start_idx] = start_u_dist
-        dist_matrix[start_v_idx, start_idx] = start_v_dist
+    def batch_find_path(self, graph: nx.MultiDiGraph,
+                       start_nodes: List[Tuple[int, Tuple[float, float]]],
+                       end_nodes: List[Tuple[int, Tuple[float, float]]]
+                       ) -> List[Tuple[List[int], float]]:
+        """
+        Find the shortest paths between multiple pairs of nodes using A* algorithm in batch.
+        The graph should be pre-processed by OSMDataLoader (projected to UTM, with edge weights).
+        Handles bidirectional paths separately as A→B may be different from B→A.
         
-        # Connect end projection to its edge endpoints
-        end_u_idx = node_to_idx[end_u]
-        end_v_idx = node_to_idx[end_v]
-        end_u_dist = self._euclidean_distance(
-            end_proj[0], end_proj[1],
-            float(graph.nodes[end_u]['x']), float(graph.nodes[end_u]['y'])
-        )
-        end_v_dist = self._euclidean_distance(
-            end_proj[0], end_proj[1],
-            float(graph.nodes[end_v]['x']), float(graph.nodes[end_v]['y'])
-        )
-        dist_matrix[end_idx, end_u_idx] = end_u_dist
-        dist_matrix[end_idx, end_v_idx] = end_v_dist
-        dist_matrix[end_u_idx, end_idx] = end_u_dist
-        dist_matrix[end_v_idx, end_idx] = end_v_dist
-        
-        # Solve path using A*
-        path_indices, cost = astar.solve_astar(dist_matrix, n + 2, start_idx, end_idx)
-        
-        if path_indices is None or len(path_indices) == 0:
-            raise ValueError("No path found between start and end points")
+        Args:
+            graph: NetworkX graph (already processed by OSMDataLoader)
+            start_nodes: List of (node_id, coordinates) for start points
+            end_nodes: List of (node_id, coordinates) for end points
             
-        # Convert indices back to original nodes, excluding the artificial start/end nodes
-        path = []
-        for i in path_indices:
-            if i < n:  # Only include real nodes
-                path.append(nodes[i][0])
+        Returns:
+            List of (path, cost) tuples
+        """
+        if len(start_nodes) != len(end_nodes):
+            raise ValueError("Number of start and end nodes must match")
+            
+        start_time = time.time()
+        total_paths = len(start_nodes)
         
-        return path, cost
+        print(f"\nFinding {total_paths} paths...")
+        
+        # Extract just the node IDs from start/end nodes
+        start_ids = [node_id for node_id, _ in start_nodes]
+        end_ids = [node_id for node_id, _ in end_nodes]
+        
+        # Get the largest strongly connected component from pre-processed graph
+        largest_cc = graph.graph.get('largest_cc')
+        if largest_cc is None:
+            print("Warning: Graph does not have pre-computed strongly connected component")
+            components = list(nx.strongly_connected_components(graph))
+            if not components:
+                raise ValueError("No strongly connected components found in graph")
+            largest_cc = max(components, key=len)
+        
+        # Process paths in batches for better performance
+        batch_size = 100
+        results = []
+        cache_hits = 0
+        cache_misses = 0
+        
+        for i in range(0, total_paths, batch_size):
+            batch_end_idx = min(i + batch_size, total_paths)
+            current_start_ids = start_ids[i:batch_end_idx]
+            current_end_ids = end_ids[i:batch_end_idx]
+            
+            # Find paths for this batch
+            for j, (start_id, end_id) in enumerate(zip(current_start_ids, current_end_ids)):
+                try:
+                    # Skip if nodes not in largest component
+                    if start_id not in largest_cc or end_id not in largest_cc:
+                        raise ValueError(f"Nodes {start_id} and/or {end_id} not in largest connected component")
+                    
+                    # Check cache first
+                    cached_result = self._get_cached_path(start_id, end_id)
+                    if cached_result is not None:
+                        results.append(cached_result)
+                        cache_hits += 1
+                        continue
+                        
+                    cache_misses += 1
+                    
+                    # Compute new path
+                    result = self._find_single_path(graph, start_id, end_id)
+                    results.append(result)
+                    
+                    # Cache the result
+                    self._cache_path(start_id, end_id, result)
+                    
+                except Exception as ex:
+                    print(f"Warning: Failed to find path {i+j+1}/{total_paths}: {str(ex)}")
+                    results.append(([], float('inf')))
+        
+        total_time = time.time() - start_time
+        if self.caching:
+            cache_hit_rate = (cache_hits / total_paths) * 100
+            print(f"Cache statistics:")
+            print(f"  Hits: {cache_hits}, Misses: {cache_misses}")
+            print(f"  Hit rate: {cache_hit_rate:.1f}%")
+            print(f"  Cache size: {sum(len(v) for v in self._path_cache.values())} paths")
+        print(f"Found all paths in {total_time:.1f} seconds (avg {total_time/total_paths:.4f}s per path)")
+        
+        return results

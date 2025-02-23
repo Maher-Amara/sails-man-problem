@@ -6,7 +6,6 @@ Handles loading and processing of OpenStreetMap data using OSMnx
 import osmnx as ox
 import networkx as nx
 from typing import Tuple
-import logging
 
 class OSMDataLoader:
     """
@@ -27,9 +26,6 @@ class OSMDataLoader:
             network_type: Type of network to download ('drive' only supported)
             simplify: Whether to simplify the graph topology
         """
-        # Configure logging
-        logging.basicConfig(level=logging.INFO)
-        self.logger = logging.getLogger(__name__)
         
         # Network settings
         if network_type != 'drive':
@@ -45,7 +41,7 @@ class OSMDataLoader:
         
         # Configure OSMnx settings
         ox.settings.use_cache = True
-        ox.settings.log_console = True
+        ox.settings.log_console = False
         ox.settings.timeout = 180  # Increase timeout for larger areas
         ox.settings.cache_folder = '.cache'
         ox.settings.useful_tags_way = ['bridge', 'tunnel', 'oneway', 'lanes', 'ref', 'name',
@@ -85,11 +81,25 @@ class OSMDataLoader:
             graph = ox.routing.add_edge_speeds(graph)
             graph = ox.routing.add_edge_travel_times(graph)
             
-            self.logger.info(f"Processed graph with {len(graph.nodes)} nodes and {len(graph.edges)} edges")
+            # Pre-compute and store the largest strongly connected component
+            components = list(nx.strongly_connected_components(graph))
+            if not components:
+                raise ValueError("No strongly connected components found in graph")
+            largest_cc = max(components, key=len)
+            
+            # Store useful information in the graph object
+            graph.graph['largest_cc'] = largest_cc
+            graph.graph['projection_info'] = {
+                'from_crs': "EPSG:4326",  # WGS84
+                'to_crs': "EPSG:32631"    # UTM zone 31N
+            }
+            
+            print(f"Processed graph with {len(graph.nodes)} nodes and {len(graph.edges)} edges")
+            print(f"Largest strongly connected component has {len(largest_cc)} nodes")
             return graph
             
         except Exception as e:
-            self.logger.error(f"Error processing graph: {e}")
+            print(f"Error processing graph: {e}")
             raise
     
     def load_network(self) -> nx.MultiDiGraph:
@@ -99,24 +109,19 @@ class OSMDataLoader:
         Returns:
             NetworkX graph representing the road network
         """
-        try:
-            self.logger.info("Loading network data...")
-            
-            # Download graph using bbox
-            graph = ox.graph_from_bbox(
-                bbox=self.bbox,
-                network_type= self.network_type,
-                simplify=self.simplify,
-                truncate_by_edge=self.truncate_by_edge,
-                retain_all=self.retain_all,
-            )
-            
-            # Process and optimize the graph
-            graph = self._process_graph(graph)
-            
-            self.logger.info(f"Network loaded: {len(graph.nodes)} nodes, {len(graph.edges)} edges")
-            return graph
-            
-        except Exception as e:
-            self.logger.error(f"Error loading network data: {e}")
-            raise
+        print("Loading network data...")
+        
+        # Download graph using bbox
+        graph = ox.graph_from_bbox(
+            bbox=self.bbox,
+            network_type= self.network_type,
+            simplify=self.simplify,
+            truncate_by_edge=self.truncate_by_edge,
+            retain_all=self.retain_all,
+        )
+        
+        # Process and optimize the graph
+        graph = self._process_graph(graph)
+        
+        print(f"Network loaded: {len(graph.nodes)} nodes, {len(graph.edges)} edges")
+        return graph

@@ -5,6 +5,15 @@
 #include <numpy/arrayobject.h>
 #include <stdbool.h>
 
+// Configuration constants
+#define INITIAL_QUEUE_CAPACITY 4096  // Increased from 1024
+#define QUEUE_GROWTH_FACTOR 2
+#define MAX_EDGES_PER_VERTEX 64     // Increased from 32
+#define MAX_QUEUE_SIZE 200000       // Increased from 50000
+#define PRUNE_THRESHOLD 0.95        // Less aggressive pruning
+#define PRUNE_TARGET 0.7            // Less aggressive pruning target
+#define MAX_ITERATIONS 500000       // Increased from 150000
+
 // Core node structure for A*
 typedef struct Node {
     int* path;              // Current path
@@ -51,5 +60,8 @@ PriorityQueue* create_priority_queue(int capacity);
 void free_priority_queue(PriorityQueue* queue);
 void push_node(PriorityQueue* queue, Node* node);
 Node* pop_node(PriorityQueue* queue);
+
+// Node comparison function for sorting
+static int compare_nodes(const Node** a, const Node** b);
 
 #endif // ASTAR_H 

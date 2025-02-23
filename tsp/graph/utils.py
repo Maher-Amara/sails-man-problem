@@ -5,13 +5,11 @@ import networkx as nx
 import os
 import pyproj
 import geopandas as gpd
-from shapely.geometry import Point, LineString
+from shapely.geometry import Point
 import numpy as np
-import logging
+import random
 
-logger = logging.getLogger(__name__)
-
-def calculate_bounding_box(points: List[Tuple[float, float]], margin: float = 0.5) -> Tuple[float, float, float, float]:
+def calculate_bounding_box(points: List[Tuple[float, float]], margin: float = 0.01) -> Tuple[float, float, float, float]:
     """
     Calculate a bounding box that contains all points with a margin
     
@@ -181,15 +179,14 @@ def load_tsp_file(filename):
     """
     pass
 
-def visualize_tsp_graph(G: nx.Graph,
-                       points: List[Tuple[float, float]],
+def visualize_tsp_graph(G: nx.DiGraph,
                        labels: List[str],
                        save_path: str = 'diagrams/tsp_graph.png') -> None:
     """
-    Visualize the complete TSP graph with points of interest and their interconnecting paths.
+    Visualize the complete directed TSP graph with points of interest and their interconnecting paths.
     
     Args:
-        G: NetworkX graph representing the complete TSP graph
+        G: NetworkX directed graph representing the complete TSP graph
         points: List of (latitude, longitude) coordinates for points of interest
         labels: Labels for the points
         save_path: Path where to save the visualization
@@ -202,7 +199,12 @@ def visualize_tsp_graph(G: nx.Graph,
     
     # Draw edges with weights as labels
     pos = nx.get_node_attributes(G, 'pos')
-    nx.draw_networkx_edges(G, pos, edge_color='gray', alpha=0.5)
+    
+    # Draw edges with arrows to show direction
+    nx.draw_networkx_edges(G, pos, edge_color='gray', alpha=0.5,
+                          arrowsize=20, arrowstyle='->', connectionstyle='arc3, rad=0.1')
+    
+    # Add edge labels with distances
     edge_labels = nx.get_edge_attributes(G, 'weight')
     edge_labels = {k: f'{v:.0f}m' for k, v in edge_labels.items()}
     nx.draw_networkx_edge_labels(G, pos, edge_labels, font_size=8)
@@ -213,7 +215,7 @@ def visualize_tsp_graph(G: nx.Graph,
     nx.draw_networkx_labels(G, label_pos, {i: label for i, label in enumerate(labels)}, font_size=10)
     
     # Set axis properties
-    plt.title('TSP Graph with Real Street Distances')
+    plt.title('TSP Graph with Real Street Distances\n(arrows indicate direction)')
     plt.axis('on')
     plt.grid(True)
     
@@ -257,7 +259,6 @@ def visualize_points_of_interest(graph: nx.MultiDiGraph,
 def visualize_node_mapping(
     graph: nx.MultiDiGraph,
     point: Tuple[float, float],
-    node_id: int,
     nearest_point: Tuple[float, float],
     point_label: str,
     save_path: str = 'diagrams/node_mapping.png'
@@ -268,7 +269,6 @@ def visualize_node_mapping(
     Args:
         graph: NetworkX graph of the street network
         point: Original point as (latitude, longitude)
-        node_id: ID of the nearest node
         nearest_point: Coordinates of the nearest node (x, y)
         point_label: Label for the point (e.g., "Grand Place")
         save_path: Path where to save the visualization
@@ -278,7 +278,7 @@ def visualize_node_mapping(
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
     
     # Create figure and axis
-    fig, ax = plt.subplots(figsize=(20, 20))
+    _, ax = plt.subplots(figsize=(20, 20))
     
     # Plot the street network
     ox.plot_graph(
@@ -302,6 +302,10 @@ def visualize_node_mapping(
     )
     gdf_point = gdf_point.to_crs(graph.graph['crs'])
     
+    # Calculate the distance
+    distance = ((gdf_point.geometry.iloc[0].x - nearest_point[0])**2 + 
+               (gdf_point.geometry.iloc[0].y - nearest_point[1])**2)**0.5
+    
     # Plot the connection line from original point to nearest node
     ax.plot(
         [gdf_point.geometry.iloc[0].x, nearest_point[0]],
@@ -312,6 +316,28 @@ def visualize_node_mapping(
         alpha=0.8,
         zorder=2,
         label='Distance to nearest node'
+    )
+    
+    # Add distance label on the connection line
+    midpoint_x = (gdf_point.geometry.iloc[0].x + nearest_point[0]) / 2
+    midpoint_y = (gdf_point.geometry.iloc[0].y + nearest_point[1]) / 2
+    ax.annotate(
+        f'{distance:.1f}m',
+        (midpoint_x, midpoint_y),
+        xytext=(0, 8),
+        textcoords='offset points',
+        ha='center',
+        va='bottom',
+        fontsize=12,
+        weight='bold',
+        bbox=dict(
+            facecolor='white',
+            edgecolor='#e67e22',
+            alpha=0.8,
+            pad=0.5,
+            boxstyle='round,pad=0.5'
+        ),
+        zorder=3
     )
     
     # Plot the original point
@@ -357,10 +383,6 @@ def visualize_node_mapping(
         ),
         zorder=5
     )
-    
-    # Calculate the distance
-    distance = ((gdf_point.geometry.iloc[0].x - nearest_point[0])**2 + 
-               (gdf_point.geometry.iloc[0].y - nearest_point[1])**2)**0.5
     
     # Add title with mapping information
     ax.set_title(
@@ -412,7 +434,7 @@ def visualize_path(
     end_point: Tuple[float, float],
     start_label: str,
     end_label: str,
-    save_path: str = 'diagrams/path.png'
+    save_path: str = 'diagrams/path'
 ) -> None:
     """
     Create a visualization showing the path between two points on the street network.
@@ -428,7 +450,7 @@ def visualize_path(
     """
     
     # Create output directory if it doesn't exist
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+    os.makedirs(os.path.dirname(f"{save_path}"), exist_ok=True)
     
     # Create figure and axis
     fig, ax = plt.subplots(figsize=(20, 20))
@@ -464,61 +486,53 @@ def visualize_path(
     for i in range(len(path) - 1):
         u, v = path[i], path[i + 1]
         
-        try:
-            # Get node coordinates directly
-            u_x, u_y = float(graph.nodes[u]['x']), float(graph.nodes[u]['y'])
-            v_x, v_y = float(graph.nodes[v]['x']), float(graph.nodes[v]['y'])
-            
-            # Check each coordinate individually
-            invalid_coords = False
-            for coord in [u_x, u_y, v_x, v_y]:
-                if np.isnan(coord) or np.isinf(coord):
-                    invalid_coords = True
-                    break
-            
-            if invalid_coords:
-                logger.warning(f"Invalid coordinates for nodes {u}-{v}, skipping")
-                continue
-            
-            # Calculate progress through the path for color gradient
-            progress = i / (len(path) - 2) if len(path) > 2 else 0
-            
-            # Color gradient from blue to green
-            color = (
-                0.2 * (1 - progress),  # Red component
-                0.6 + 0.2 * progress,  # Green component
-                0.8 * (1 - progress)   # Blue component
-            )
-            
-            # Plot the edge as a straight line between nodes
-            ax.plot(
-                [u_x, v_x],
-                [u_y, v_y],
-                color=color,
-                linewidth=4,
-                alpha=0.8,
-                zorder=3,
-                solid_capstyle='round'
-            )
-            
-            # Add coordinates to the list for view limits
-            all_x_coords.extend([u_x, v_x])
-            all_y_coords.extend([u_y, v_y])
-            
-            # Add to total length
-            edge_length = np.sqrt((v_x - u_x)**2 + (v_y - u_y)**2)
-            total_length += edge_length
-            
-        except Exception as e:
-            logger.warning(f"Failed to plot edge {u}-{v}: {str(e)}")
+        # Get node coordinates directly
+        u_x, u_y = float(graph.nodes[u]['x']), float(graph.nodes[u]['y'])
+        v_x, v_y = float(graph.nodes[v]['x']), float(graph.nodes[v]['y'])
+        
+        # Check each coordinate individually
+        invalid_coords = False
+        for coord in [u_x, u_y, v_x, v_y]:
+            if np.isnan(coord) or np.isinf(coord):
+                invalid_coords = True
+                break
+        
+        if invalid_coords:
+            print(f"Invalid coordinates for nodes {u}-{v}, skipping")
             continue
+        
+        # Calculate progress through the path for color gradient
+        progress = i / (len(path) - 2) if len(path) > 2 else 0
+        
+        # Color gradient from blue to green
+        color = (
+            0.2 * (1 - progress),  # Red component
+            0.6 + 0.2 * progress,  # Green component
+            0.8 * (1 - progress)   # Blue component
+        )
+        
+        # Plot the edge as a straight line between nodes
+        ax.plot(
+            [u_x, v_x],
+            [u_y, v_y],
+            color=color,
+            linewidth=4,
+            alpha=0.8,
+            zorder=3,
+            solid_capstyle='round'
+        )
+        
+        # Add coordinates to the list for view limits
+        all_x_coords.extend([u_x, v_x])
+        all_y_coords.extend([u_y, v_y])
+        
+        # Add to total length
+        edge_length = np.sqrt((v_x - u_x)**2 + (v_y - u_y)**2)
+        total_length += edge_length
     
     # Add start/end point coordinates to ensure they're included in the view
-    try:
-        all_x_coords.extend([gdf_points.geometry[0].x, gdf_points.geometry[1].x])
-        all_y_coords.extend([gdf_points.geometry[0].y, gdf_points.geometry[1].y])
-    except Exception as e:
-        logger.warning(f"Failed to add start/end points to coordinate list: {str(e)}")
+    all_x_coords.extend([gdf_points.geometry[0].x, gdf_points.geometry[1].x])
+    all_y_coords.extend([gdf_points.geometry[0].y, gdf_points.geometry[1].y])
     
     if not all_x_coords or not all_y_coords:
         raise ValueError("No valid coordinates found for visualization")
@@ -662,10 +676,66 @@ def visualize_path(
     
     # Save with high DPI
     plt.savefig(
-        save_path,
+        f"{save_path}/{start_label}_{end_label}.png",
         dpi=300,
         bbox_inches='tight',
         pad_inches=0.5,
         facecolor='white'
     )
     plt.close()
+
+def random_places_geo(bbox: Tuple[float, float, float, float], n: int) -> List[Tuple[Tuple[float, float], str]]:
+    """
+    Generate a specified number of real places within a bounding box (bbox)
+    from an OpenStreetMap dataset API using OSMnx.
+    
+    Args:
+        bbox: Tuple of (left, bottom, right, top) coordinates in degrees.
+        n: Number of random points to generate.
+        
+    Returns:
+        List of tuples containing ((latitude, longitude), label) for each point.
+    """
+    # Create tags for places we want to fetch (amenities, tourism spots, etc.)
+    tags = {
+        'amenity': ['restaurant', 'cafe', 'bar', 'pub', 'fast_food', 'museum', 'theatre', 'cinema', 'library', 'marketplace'],
+        'tourism': ['attraction', 'museum', 'artwork', 'gallery', 'viewpoint', 'hotel'],
+        'leisure': ['park', 'garden', 'sports_centre']
+    }
+    
+    # Get features within the bounding box
+    features = ox.features_from_bbox(
+        bbox,
+        tags=tags
+    )
+    
+    # If no features found, return empty list
+    if len(features) == 0:
+        print("No features found in the specified bounding box")
+        return []
+    
+    # Filter features to only include those with names
+    features = features[features['name'].notna()]
+    
+    if len(features) == 0:
+        print("No named features found in the specified bounding box")
+        return []
+    
+    # Ensure we don't sample more points than available
+    num_samples = min(n, len(features))
+    
+    if num_samples < n:
+        print(f"Only found {num_samples} named places, less than requested {n}")
+    
+    # Randomly select features
+    random.seed(1)  # For reproducibility
+    sampled_features = features.sample(n=num_samples, random_state=1)
+    
+    points = []
+    for idx, row in sampled_features.iterrows():
+        # Get coordinates from the geometry
+        lon, lat = row.geometry.centroid.coords[0]
+        name = row['name']  # We know this exists because we filtered for it
+        points.append(((lat, lon), name))
+    
+    return points

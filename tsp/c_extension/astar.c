@@ -15,19 +15,34 @@
 #define PRUNE_TARGET 0.5       // More aggressive pruning to 50% capacity
 #define MAX_ITERATIONS 150000  // Maximum number of iterations before giving up
 
+// Helper function for qsort in push_node
+static int compare_nodes(const Node** a, const Node** b) {
+    if ((*a)->f_cost < (*b)->f_cost) return -1;
+    if ((*a)->f_cost > (*b)->f_cost) return 1;
+    return 0;
+}
+
 PriorityQueue* create_priority_queue(int capacity) {
     PriorityQueue* queue = (PriorityQueue*)malloc(sizeof(PriorityQueue));
+    if (!queue) return NULL;
     queue->nodes = (Node**)malloc(capacity * sizeof(Node*));
+    if (!queue->nodes) {
+        free(queue);
+        return NULL;
+    }
     queue->capacity = capacity;
     queue->size = 0;
     return queue;
 }
 
 void free_priority_queue(PriorityQueue* queue) {
-    for (int i = 0; i < queue->size; i++) {
-        free_node(queue->nodes[i]);
+    if (!queue) return;
+    if (queue->nodes) {
+        for (int i = 0; i < queue->size; i++) {
+            if (queue->nodes[i]) free_node(queue->nodes[i]);
+        }
+        free(queue->nodes);
     }
-    free(queue->nodes);
     free(queue);
 }
 
@@ -68,17 +83,38 @@ static void sift_down(PriorityQueue* queue, int idx) {
 }
 
 void push_node(PriorityQueue* queue, Node* node) {
-    if (queue->size == queue->capacity) {
-        queue->capacity *= 2;
-        queue->nodes = (Node**)realloc(queue->nodes, queue->capacity * sizeof(Node*));
+    if (!queue || !node) return;
+
+    // Check if queue needs pruning
+    if (queue->size >= MAX_QUEUE_SIZE * PRUNE_THRESHOLD) {
+        // Sort nodes by f_cost and keep only the most promising ones
+        int new_size = (int)(MAX_QUEUE_SIZE * PRUNE_TARGET);
+        qsort(queue->nodes, queue->size, sizeof(Node*), 
+              (int (*)(const void*, const void*))compare_nodes);
+        
+        // Free excess nodes
+        for (int i = new_size; i < queue->size; i++) {
+            free_node(queue->nodes[i]);
+        }
+        queue->size = new_size;
     }
+
+    // Grow queue if needed
+    if (queue->size == queue->capacity) {
+        int new_capacity = queue->capacity * QUEUE_GROWTH_FACTOR;
+        Node** new_nodes = (Node**)realloc(queue->nodes, new_capacity * sizeof(Node*));
+        if (!new_nodes) return;  // Failed to grow queue
+        queue->nodes = new_nodes;
+        queue->capacity = new_capacity;
+    }
+
     queue->nodes[queue->size] = node;
     sift_up(queue, queue->size);
     queue->size++;
 }
 
 Node* pop_node(PriorityQueue* queue) {
-    if (queue->size == 0) return NULL;
+    if (!queue || queue->size == 0) return NULL;
     
     Node* result = queue->nodes[0];
     queue->size--;
@@ -91,7 +127,14 @@ Node* pop_node(PriorityQueue* queue) {
 
 Node* create_node(int* path, int path_length, double g_cost, double h_cost) {
     Node* node = (Node*)malloc(sizeof(Node));
+    if (!node) return NULL;
+    
     node->path = (int*)malloc(path_length * sizeof(int));
+    if (!node->path) {
+        free(node);
+        return NULL;
+    }
+    
     memcpy(node->path, path, path_length * sizeof(int));
     node->path_length = path_length;
     node->g_cost = g_cost;
@@ -101,7 +144,8 @@ Node* create_node(int* path, int path_length, double g_cost, double h_cost) {
 }
 
 void free_node(Node* node) {
-    free(node->path);
+    if (!node) return;
+    if (node->path) free(node->path);
     free(node);
 }
 
@@ -122,6 +166,7 @@ double calculate_heuristic(AStarState* state, Node* node) {
                 h_cost = state->graph->costs[current][i];
             }
         }
+        if (h_cost == DBL_MAX) h_cost = 0;  // Fallback if no valid edges found
     }
     return h_cost;
 }
@@ -265,7 +310,11 @@ static struct PyModuleDef astar_module = {
     "astar",
     "A* algorithm for solving TSP",
     -1,
-    AStarMethods
+    AStarMethods,
+    NULL,  // m_slots
+    NULL,  // m_traverse
+    NULL,  // m_clear
+    NULL   // m_free
 };
 
 PyMODINIT_FUNC PyInit_astar(void) {
