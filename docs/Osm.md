@@ -93,13 +93,35 @@ The loader uses OSMnx to transform OpenStreetMap data into a NetworkX graph opti
   - Distance measurements in meters
   - Directional flow handling
 
-### 3. Network Optimization
+### 3. Graph Optimization
 
-- **Graph Enhancement**:
-  - Extraction of largest strongly connected component
-  - Edge speed and travel time calculations
-  - UTM coordinate projection for distance accuracy
-  - Topology simplification (optional)
+- **Pre-processing**:
+  - Automatic projection to UTM coordinates
+  - Edge speed calculations
+  - Travel time computations
+  - Strong connectivity analysis
+
+- **Component Analysis**:
+  - Pre-computation of strongly connected components
+  - Storage of largest component for efficient access
+  - Component size statistics
+  - Connectivity validation
+
+### 4. Graph Properties
+
+- **Stored Information**:
+  - Largest strongly connected component
+  - Projection information (WGS84 to UTM)
+  - Network statistics
+  - Processing metadata
+
+### 5. Configuration Options
+
+- **Network Settings**:
+  - simplify: Boolean for topology simplification
+  - truncate_by_edge: Include crossing edges
+  - retain_all: Connected component handling
+  - network_type: Currently 'drive' only
 
 ## Output Format
 
@@ -141,19 +163,19 @@ The loader includes comprehensive visualization features:
    - Area overview
    - Interactive controls
 
-## Integration with A*
+## Integration Features
 
-The loader is designed to work seamlessly with the A* path finding algorithm:
+1. **A* Algorithm Support**:
+   - Pre-computed strongly connected components
+   - UTM projection for accurate distances
+   - Efficient node and edge access
+   - Optimized path finding support
 
-1. **Data Preparation**:
-   - Graph structure optimization
-   - Weight calculations
-   - Heuristic function support
-
-2. **Path finding Support**:
-   - Direct graph format compatibility
-   - Efficient node access
-   - Integrated distance calculations
+2. **Batch Processing**:
+   - Efficient handling of multiple queries
+   - Cached results for repeated operations
+   - Progress tracking and statistics
+   - Performance optimization
 
 ## Performance Considerations
 

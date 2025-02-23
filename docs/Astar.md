@@ -29,45 +29,56 @@ In our TSP solution, A\* serves two critical functions:
 
 ## Algorithm Components
 
-### 1. Heuristic Function h(n)
+### 1. Coordinate Handling
 
-The heuristic component estimates remaining distance to the goal using:
+- WGS84 to UTM conversion for accurate distance calculations
+- Efficient caching of coordinate transformations
+- Batch processing of coordinate conversions
 
-- Direct distance calculations
-- City-block measurements
-- Geographic distance formulas
-- Custom estimation methods
+### 2. Node Mapping
 
-### 2. Cost Function g(n)
+- Efficient nearest node finding using vectorized operations
+- Caching of nearest node results
+- Batch processing capability for multiple points
 
-Tracks actual travel costs through:
+### 3. Path Finding
 
-- Real road distance measurements
-- Accumulated path distances
-- Travel time calculations
-- Road type considerations
+- Cached path results for repeated queries
+- Batch processing of multiple path requests
+- Strongly connected component optimization
+- Progress tracking and performance metrics
 
-### 3. Evaluation Function f(n)
+## Performance Optimizations
 
-Combines actual and estimated costs:
+1. **Caching System**:
+   - Coordinate transformation cache
+   - Nearest node lookup cache
+   - Path result cache with O(1) lookup
+   - Cache statistics tracking
 
-- Total cost calculation: f(n) = g(n) + h(n)
-- Path evaluation metrics
-- Route optimization logic
+2. **Batch Processing**:
+   - Vectorized nearest node calculations
+   - Batch path finding with configurable batch size
+   - Progress reporting and timing metrics
+
+3. **Graph Optimization**:
+   - Pre-computed strongly connected components
+   - UTM projection for accurate distances
+   - Efficient graph traversal
 
 ## Output Format
 
-1. **Path Information**:
-   - Ordered location sequence
-   - Complete route description
-   - Navigation waypoints
-   - Empty result for impossible routes
+1. **Path Results**:
+   - List of node IDs representing the path
+   - Total path cost in meters
+   - Empty path and infinite cost for impossible routes
+   - Batch results for multiple queries
 
-2. **Cost Details**:
-   - Total route distance
-   - Accumulated travel costs
-   - Segment breakdowns
-   - Invalid path indicators
+2. **Performance Metrics**:
+   - Execution time per path
+   - Cache hit rates
+   - Total processing time
+   - Memory usage statistics
 
 ## Performance Characteristics
 
